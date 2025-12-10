@@ -3,3 +3,4 @@ ccxt
 pandas
 pandas-ta
 numpy
+requests
