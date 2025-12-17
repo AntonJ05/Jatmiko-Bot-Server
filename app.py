@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Jatmiko Hunter Ultimate", page_icon="🦅", layout="wide")
+st.set_page_config(page_title="Jatmiko Hybrid Pro", page_icon="🦅", layout="wide")
 
 # --- INISIALISASI SESSION STATE ---
 if 'last_scan_time' not in st.session_state:
@@ -49,7 +49,6 @@ def run_scanner(exchange_id, timeframe, limit_candle, symbols, modal_awal, resik
     laporan_data = []
     significant_signals = [] 
     
-    # Progress Bar UI
     progress_bar = None
     status_text = None
     if len(symbols) > 1:
@@ -63,7 +62,7 @@ def run_scanner(exchange_id, timeframe, limit_candle, symbols, modal_awal, resik
             try:
                 progress_percent = (i + 1) / total_symbols
                 progress_bar.progress(progress_percent)
-                status_text.text(f"🦅 Menganalisa {symbol} ({i+1}/{total_symbols})...")
+                status_text.text(f"🦅 Menganalisa Pola Candle {symbol} ({i+1}/{total_symbols})...")
             except: pass
         
         try:
@@ -74,97 +73,155 @@ def run_scanner(exchange_id, timeframe, limit_candle, symbols, modal_awal, resik
             df = pd.DataFrame(bars, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume'])
             df['Time'] = pd.to_datetime(df['Time'], unit='ms')
 
-            # Fix Index & Sort (Wajib untuk VWAP)
             df.set_index('Time', inplace=True)
             df.sort_index(inplace=True) 
 
             if len(df) < 200: continue
             
-            # 2. HITUNG INDIKATOR
+            # 2. HITUNG INDIKATOR TREND (Jatmiko Logic)
             df['EMA_50'] = ta.ema(df['Close'], length=50)
             df['EMA_200'] = ta.ema(df['Close'], length=200)
             df['VWAP'] = ta.vwap(df['High'], df['Low'], df['Close'], df['Volume'])
             df['RSI'] = ta.rsi(df['Close'], length=14)
             df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-            
-            adx = ta.adx(df['High'], df['Low'], df['Close'])
-            df['ADX'] = adx['ADX_14']
-            
+            df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
             df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+            
+            # Rata-rata Volume untuk deteksi Paus
+            df['VOL_SMA'] = df['Volume'].rolling(20).mean()
 
-            # DATA CANDLE
-            last = df.iloc[-1]   # Candle Running
-            prev = df.iloc[-2]   # Candle Confirm
+            # --- PERHITUNGAN MANUAL (GainzAlgo Logic) ---
+            # Kita hitung manual karena kita butuh logika Candle Engulfing + Stability
+            
+            last = df.iloc[-1]   # Candle Sekarang
+            prev = df.iloc[-2]   # Candle Sebelumnya
 
             if pd.isna(last['EMA_200']) or pd.isna(last['VWAP']): continue
 
-            # 3. LOGIKA SINYAL (INSTITUTIONAL)
+            # A. Stability Index (Dari Script Teman)
+            # Rumus: (Close - Open) / (High - Low)
+            # Tujuannya menyaring candle "kurus" atau Doji
+            body_size = abs(last['Close'] - last['Open'])
+            total_range = last['High'] - last['Low']
+            
+            stability_index = 0
+            if total_range > 0:
+                stability_index = body_size / total_range
+            
+            # Kita pakai 0.5 (Essential Mode) agar tidak terlalu ketat, tapi cukup memfilter noise
+            is_stable_candle = stability_index > 0.5
+
+            # B. Engulfing Pattern (Dari Script Teman)
+            # Bullish Engulfing: Kemarin Merah, Sekarang Hijau & Lebih Besar
+            bullish_engulfing = (prev['Close'] < prev['Open']) and \
+                                (last['Close'] > last['Open']) and \
+                                (last['Close'] > prev['Open']) and \
+                                (last['Open'] < prev['Close'])
+
+            # Bearish Engulfing: Kemarin Hijau, Sekarang Merah & Lebih Besar
+            bearish_engulfing = (prev['Close'] > prev['Open']) and \
+                                (last['Close'] < last['Open']) and \
+                                (last['Close'] < prev['Open']) and \
+                                (last['Open'] > prev['Close'])
+
+            # 3. LOGIKA GABUNGAN (HYBRID)
+            
+            # Jatmiko Logic (Trend & Filter)
             is_uptrend = last['Close'] > last['EMA_200']
             is_downtrend = last['Close'] < last['EMA_200']
-            
             above_vwap = last['Close'] > last['VWAP']
             below_vwap = last['Close'] < last['VWAP']
+            strong_trend = last['ADX'] > 20 # Standar 20 cukup karena sudah ada filter candle
             
-            money_in = last['MFI'] > 50
-            strong_trend = last['ADX'] > 20
-            
-            signal = "NEUTRAL"
-            
-            # Skenario BUY
-            if is_uptrend and above_vwap and money_in and strong_trend:
-                signal = "STRONG BUY"
-                
-            # Skenario SELL
-            elif is_downtrend and below_vwap and (not money_in) and strong_trend:
-                signal = "STRONG SELL"
+            # Whale Logic
+            whale_vol_spike = last['Volume'] > (2.0 * last['VOL_SMA']) # 2x Volume
 
-            # 4. LOGIKA KONFIRMASI (ENTRY TRIGGER)
+            signal = "NEUTRAL"
+            reason = "-"
+            pola_candle = "-"
+
+            # --- SKENARIO BUY HYBRID ---
+            # Syarat: Trend Naik + Diatas VWAP + (Ada Engulfing ATAU Paus) + Candle Stabil
+            if is_uptrend and above_vwap and strong_trend:
+                if last['RSI'] < 70:
+                    # Prioritas 1: Pola Candle Engulfing yang Stabil
+                    if bullish_engulfing and is_stable_candle:
+                        signal = "STRONG BUY"
+                        pola_candle = "🕯️ Bullish Engulfing"
+                        reason = "Trend Up + Engulfing Valid"
+                    
+                    # Prioritas 2: Ada Paus Masuk (Walau ga engulfing, tapi volume meledak)
+                    elif whale_vol_spike and is_stable_candle:
+                        signal = "STRONG BUY"
+                        pola_candle = "🐋 Whale Pump"
+                        reason = "Trend Up + Whale Volume"
+                    
+                    # Prioritas 3: Pullback Biasa (Tanpa Engulfing) - Kita kasih label "BUY DIP"
+                    elif last['Close'] > last['EMA_50'] and stability_index > 0.4:
+                        signal = "BUY DIP"
+                        reason = "Trend Up (Waiting Confirmation)"
+                else:
+                    reason = "Overbought"
+            
+            # --- SKENARIO SELL HYBRID ---
+            elif is_downtrend and below_vwap and strong_trend:
+                if last['RSI'] > 30:
+                    if bearish_engulfing and is_stable_candle:
+                        signal = "STRONG SELL"
+                        pola_candle = "🕯️ Bearish Engulfing"
+                        reason = "Trend Down + Engulfing Valid"
+                    
+                    elif whale_vol_spike and is_stable_candle:
+                        signal = "STRONG SELL"
+                        pola_candle = "🐋 Whale Dump"
+                        reason = "Trend Down + Whale Volume"
+                        
+                    elif last['Close'] < last['EMA_50'] and stability_index > 0.4:
+                        signal = "SELL RALLY"
+                        reason = "Trend Down (Waiting Confirmation)"
+                else:
+                    reason = "Oversold"
+
+            # 4. ENTRY TRIGGER & SAFETY SL
             entry_trigger_price = 0
             confirm_status = "-"
             
+            # Logic Trigger mengikuti pola candle
             if "BUY" in signal:
-                # Harga harus tembus HIGH candle sebelumnya
-                entry_trigger_price = prev['High']
-                if last['Close'] > entry_trigger_price:
-                    confirm_status = "✅ RUNNING" 
+                # Jika Engulfing, entry-nya di harga Close candle ini (Market Exec)
+                if "Engulfing" in pola_candle:
+                    entry_trigger_price = last['Close']
+                    confirm_status = "✅ EXECUTE NOW"
                 else:
-                    confirm_status = "⏳ PENDING" 
-                    
+                    # Jika bukan engulfing, tunggu tembus High kemarin
+                    entry_trigger_price = prev['High']
+                    confirm_status = "✅ RUNNING" if last['Close'] > entry_trigger_price else "⏳ PENDING"
+
             elif "SELL" in signal:
-                # Harga harus jebol LOW candle sebelumnya
-                entry_trigger_price = prev['Low']
-                if last['Close'] < entry_trigger_price:
-                    confirm_status = "✅ RUNNING"
+                if "Engulfing" in pola_candle:
+                    entry_trigger_price = last['Close']
+                    confirm_status = "✅ EXECUTE NOW"
                 else:
-                    confirm_status = "⏳ PENDING"
+                    entry_trigger_price = prev['Low']
+                    confirm_status = "✅ RUNNING" if last['Close'] < entry_trigger_price else "⏳ PENDING"
             
-            # 5. MANAJEMEN RESIKO (SAFETY LOCK 🔒)
+            # 5. MANAJEMEN RESIKO
             atr = last['ATR']
+            base_price = last['Close'] # Base price selalu harga sekarang untuk hitungan dinamis
             
-            # Gunakan Trigger Price sebagai patokan (biar akurat saat pasang pending order)
-            # Jika Trigger 0 (neutral), pakai harga close
-            base_price = entry_trigger_price if entry_trigger_price > 0 else last['Close']
-            
-            # --- LOGIKA SAFETY SL ---
-            # Opsi 1: Jarak ATR (2x Volatilitas)
+            # Safety SL
             dist_atr = 2 * atr
-            
-            # Opsi 2: Jarak Minimal 1% (Safety Net)
-            dist_min = base_price * 0.01
-            
-            # Ambil yang TERBESAR (Paling Aman)
+            dist_min = base_price * 0.01 
             final_dist = max(dist_atr, dist_min)
             
             if "BUY" in signal:
                 sl = base_price - final_dist
-                tp = base_price + (final_dist * 1.5) # RR 1:1.5
+                tp = base_price + (final_dist * 1.5)
                 dist_sl_percent = (base_price - sl) / base_price
-                
             elif "SELL" in signal:
                 sl = base_price + final_dist
                 tp = base_price - (final_dist * 1.5)
                 dist_sl_percent = (sl - base_price) / base_price
-                
             else:
                 sl = 0; tp = 0; dist_sl_percent = 0
 
@@ -184,13 +241,16 @@ def run_scanner(exchange_id, timeframe, limit_candle, symbols, modal_awal, resik
                 "Coin": symbol, 
                 "Price": float(f"{last['Close']:.8f}"), 
                 "Signal": signal,
+                "Pattern": pola_candle,
                 "Status": confirm_status,
+                "Stability": f"{int(stability_index * 100)}%", # Tampilkan kualitas candle
                 "Trigger ($)": float(f"{entry_trigger_price:.8f}"), 
                 "TP": float(f"{tp:.8f}"), 
                 "SL": float(f"{sl:.8f}"), 
                 "Total Size ($)": round(position_size_usd, 2),
                 "Est. Margin ($)": round(margin_needed, 2),
-                "Lev (x)": f"{leverage_needed}x"
+                "Lev (x)": f"{leverage_needed}x",
+                "Info": reason
             }
             laporan_data.append(data_row)
             
@@ -207,19 +267,17 @@ def run_scanner(exchange_id, timeframe, limit_candle, symbols, modal_awal, resik
     
     # Telegram Logic
     if kirim_laporan and significant_signals and len(symbols) > 1:
-        current_sig_str = sorted([f"{x['Coin']}_{x['Signal']}_{x['Status']}" for x in significant_signals])
+        current_sig_str = sorted([f"{x['Coin']}_{x['Signal']}_{x['Pattern']}" for x in significant_signals])
         last_sig_str = sorted(st.session_state['last_signals'])
         
         if current_sig_str != last_sig_str:
-            pesan = f"🦅 *INSTITUTIONAL SIGNAL* 🦅\n⏰ {datetime.now().strftime('%H:%M')} WIB\n\n"
+            pesan = f"🦅 *JATMIKO HYBRID SIGNAL* 🦅\n⏰ {datetime.now().strftime('%H:%M')} WIB\n\n"
             for item in significant_signals:
                 icon = "🟢" if "BUY" in item['Signal'] else "🔴"
-                status_icon = "✅" if "RUNNING" in item['Status'] else "⏳"
                 
                 pesan += f"{icon} *{item['Coin']}* ({item['Signal']})\n"
-                pesan += f"Status: {status_icon} {item['Status']}\n"
-                pesan += f"Trigger: {item['Trigger ($)']:.8f}\n" 
-                pesan += f"Lev: {item['Lev (x)']} | Size: ${item['Total Size ($)']}\n"
+                pesan += f"🔥 Pola: {item['Pattern']} (Kualitas: {item['Stability']})\n"
+                pesan += f"Lev: {item['Lev (x)']} | Margin: ${item['Est. Margin ($)']}\n"
                 pesan += f"🎯 TP: {item['TP']:.8f}\n🛑 SL: {item['SL']:.8f}\n\n"
             
             send_telegram(pesan)
@@ -240,13 +298,13 @@ all_coins = [
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("🦅 JATMIKO PRO v4")
+    st.header("🦅 JATMIKO HYBRID")
     mode = st.radio("Mode:", ["🔍 Single Analyzer", "📋 Bulk Scanner", "🤖 Auto Pilot"])
     st.divider()
     
     final_symbols = []
     if mode == "🔍 Single Analyzer":
-        st.info("Cek detail 1 koin.")
+        st.info("Cek detail Pattern & Stability.")
         single_coin = st.text_input("Simbol:", value="BTC/USDT")
         if single_coin: final_symbols = [single_coin.upper().strip()]
     else:
@@ -276,26 +334,29 @@ if mode == "🔍 Single Analyzer":
     if st.button("🔎 ANALISA", type="primary"):
         if not final_symbols: st.error("Input simbol!")
         else:
-            with st.spinner("Menghitung Konfirmasi & Safety..."):
+            with st.spinner("Mendeteksi Pola Candle Hybrid..."):
                 df = run_scanner(exchange_id, timeframe, LIMIT_CANDLE, final_symbols, modal_awal, resiko, False)
                 if not df.empty:
                     data = df.iloc[0]
                     color = "green" if "BUY" in data['Signal'] else "red" if "SELL" in data['Signal'] else "gray"
                     st.markdown(f":{color}[## {data['Signal']}]")
                     
-                    if "RUNNING" in data['Status']:
-                        st.success(f"STATUS: {data['Status']} (Harga > Trigger)")
-                    elif "PENDING" in data['Status']:
-                        st.warning(f"STATUS: {data['Status']} (Pasang Order di {data['Trigger ($)']})")
-                    
+                    if "Engulfing" in data['Pattern']:
+                        st.success(f"🔥 POLA CANDLE: {data['Pattern']}")
+                    elif "Whale" in data['Pattern']:
+                         st.warning(f"🐋 VOLUME: {data['Pattern']}")
+                    else:
+                        st.info("Pola Candle: Biasa")
+
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Harga Market", f"{data['Price']:.8f}")
-                    c2.metric("🎯 ENTRY TRIGGER", f"{data['Trigger ($)']:.8f}")
+                    c1.metric("Kualitas Candle (Stability)", data['Stability'])
+                    c2.metric("Pemicu (Trigger)", f"{data['Trigger ($)']:.8f}")
                     c3.metric("Leverage", data['Lev (x)'])
                     
                     st.divider()
+                    st.write(f"ℹ️ **Info:** {data['Info']}")
                     st.subheader("💰 Money Management")
-                    st.write(f"Modal (Margin) Diperlukan: **${data['Est. Margin ($)']}**")
+                    st.write(f"Modal (Margin): **${data['Est. Margin ($)']}**")
                     st.table(pd.DataFrame([data]))
                 else: st.warning("Data tidak ditemukan.")
 
@@ -327,7 +388,7 @@ elif mode == "🤖 Auto Pilot":
         st.rerun()
         
     if st.session_state['is_running']:
-        st.success("Auto Pilot ON.")
+        st.success("Hybrid Engine ON.")
         df = run_scanner(exchange_id, timeframe, LIMIT_CANDLE, final_symbols, modal_awal, resiko, kirim_laporan)
         
         if not df.empty:
