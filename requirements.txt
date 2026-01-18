@@ -1,6 +1,5 @@
 streamlit
-ccxt
+yfinance
 pandas
-pandas_ta
 requests
 pytz
