@@ -13,7 +13,7 @@ TELEGRAM_CHAT_ID = "6244409531"
 # Daftar 20 Koin Pilihan Anda (Format Yahoo Finance)
 DAFTAR_KOIN = [
     "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD",
-    "ADA-USD", "DOGE-USD", "AVAX-USD", "FIL-USD", "IP-USD",
+    "ADA-USD", "RIVER-USD", "AVAX-USD", "FIL-USD", "IP-USD",
     "DOT-USD", "LINK-USD", "DASH-USD", "LTC-USD", "TRX-USD",
     "BCH-USD", "NEAR-USD", "OP-USD", "XMR-USD", "FHE-USD"
 ]
@@ -31,6 +31,7 @@ def kirim_telegram(pesan):
 def hitung_sinyal(symbol):
     try:
         df = yf.download(symbol, period='5d', interval='1h', progress=False, auto_adjust=True)
+        df.columns = df.columns.get_level_values(0)
         if len(df) < 30: return None
 
         # --- ADOPSI ELITE CIRCLE TOOL: LOGIKA ADX (14) ---
@@ -57,7 +58,7 @@ def hitung_sinyal(symbol):
         p = df.iloc[-2]
         
         # Filter Kekuatan Tren [cite: 577]
-        is_strong_trend = c['ADX'] > 25 
+        is_strong_trend = bool(c['ADX'] > 25)
         status_tren = "STRONG" if is_strong_trend else "WEAK/SIDEWAYS"
 
         # --- LOGIKA WHALE + BOLLINGER BAND ---
