@@ -30,21 +30,17 @@ def kirim_telegram(pesan):
 # ================= 3. LOGIKA SINYAL (VERSI STABIL) =================
 def hitung_sinyal(symbol):
     try:
+        # 1. AMBIL DATA (5 Hari agar ADX Akurat)
         df = yf.download(symbol, period='5d', interval='1h', progress=False, auto_adjust=True)
-        df.columns = df.columns.get_level_values(0)
+        df.columns = df.columns.get_level_values(0) # Perataan kolom
         if len(df) < 30: return None
 
-        # --- ADOPSI ELITE CIRCLE TOOL: LOGIKA ADX (14) ---
-        # Mengukur kekuatan tren [cite: 575, 576]
+        # 2. HITUNG ADX (Kekuatan Tren) [cite: 1225, 1226]
         df['H-L'] = df['High'] - df['Low']
         df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
         df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
         df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
         
-        # ATR (14) untuk Volatilitas 
-        df['ATR'] = df['TR'].rolling(14).mean()
-        
-        # Komponen ADX [cite: 575]
         df['+DM'] = (df['High'] - df['High'].shift(1)).clip(lower=0)
         df['-DM'] = (df['Low'].shift(1) - df['Low']).clip(lower=0)
         tr_smooth = df['TR'].rolling(14).mean()
@@ -53,46 +49,57 @@ def hitung_sinyal(symbol):
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         df['ADX'] = dx.rolling(14).mean()
 
-        # --- DATA TERAKHIR ---
-        c = df.iloc[-1]
-        p = df.iloc[-2]
-        
-        # Filter Kekuatan Tren [cite: 577]
-        is_strong_trend = bool(c['ADX'] > 25)
-        status_tren = "STRONG" if is_strong_trend else "WEAK/SIDEWAYS"
-
-        # --- LOGIKA WHALE + BOLLINGER BAND ---
+        # 3. HITUNG BOLLINGER BAND & ATR [cite: 652]
         ma20 = df['Close'].rolling(20).mean()
         std20 = df['Close'].rolling(20).std()
-        upper_bb = ma20 + (2 * std20)
-        lower_bb = ma20 - (2 * std20)
-        
-        # Deteksi Whale (Volume > 2x Rata-rata)
-        avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
-        is_whale = c['Volume'] > (avg_vol * 2)
+        df['upper_bb'] = ma20 + (2 * std20)
+        df['ATR'] = df['TR'].rolling(14).mean()
 
-        # --- PENENTUAN SINYAL ---
+        # 4. DATA TERAKHIR & DETEKSI PAUS
+        c1 = df.iloc[-1] # Candle saat ini
+        c2 = df.iloc[-2] # Candle sebelumnya
+        c3 = df.iloc[-3] # Candle ke-3 dari belakang
+        
+        avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
+        is_whale = bool(c1['Volume'] > (avg_vol * 2))
+        is_strong_trend = bool(c1['ADX'] > 25)
+        status_tren = "STRONG" if is_strong_trend else "WEAK/SIDOWAYS"
+
+        # 5. LOGIKA FVG (Fair Value Gap) [cite: 1131, 1140]
+        # Bullish FVG: High lilin 1 < Low lilin 3
+        fvg_detected = bool(c3['High'] < c1['Low'])
+        fvg_price = round(c3['High'], 4) if fvg_detected else 0
+        
+        # Area Discount: Jika harga sekarang dekat dengan gap [cite: 1108]
+        status_fvg = "DISCOUNT" if (fvg_detected and c1['Close'] <= fvg_price * 1.02) else "PREMIUM"
+        if not fvg_detected: status_fvg = "NO GAP"
+
+        # 6. PENENTUAN SINYAL AKHIR
         sinyal = "WAIT"
         if is_whale and is_strong_trend:
-            if c['Close'] > upper_bb.iloc[-1]:
-                sinyal = "🚀 WHALE PUMP"
-            elif c['Close'] < lower_bb.iloc[-1]:
-                sinyal = "💀 WHALE DUMP"
-        
-        # --- ADOPSI GAINZALGO: SL BERDASARKAN ATR ---
-        # SL diletakkan 1.5x jarak ATR dari harga sekarang [cite: 562, 563]
-        dist = c['ATR'] * 1.5
-        sl_atr = c['Close'] - dist if "PUMP" in sinyal else c['Close'] + dist
+            if c1['Close'] > c1['upper_bb']:
+                if status_fvg == "DISCOUNT":
+                    sinyal = "🚀 STRONG BUY (FVG)"
+                else:
+                    sinyal = "⏳ WAIT (RETRACE)" # Menunggu harga turun ke FVG [cite: 859]
+
+        # SL Dinamis berdasarkan ATR [cite: 652]
+        dist = c1['ATR'] * 1.5
+        sl_fix = c1['Close'] - dist if "PUMP" in sinyal else c1['Close'] + dist
 
         return {
             "KOIN": symbol.replace("-USD", ""),
-            "HARGA": round(c['Close'], 4),
-            "ADX": round(c['ADX'], 1),
+            "HARGA": round(c1['Close'], 4),
+            "ADX": round(c1['ADX'], 1),
             "TREN": status_tren,
-            "ATR_SL": round(sl_atr, 4),
+            "FVG_AREA": fvg_price,
+            "ZONE": status_fvg,
+            "ATR_SL": round(sl_fix, 4),
             "SINYAL": sinyal
         }
-    except: return None
+    except Exception as e:
+        st.error(f"Error pada {symbol}: {e}")
+        return None
 
 # ================= 4. DASHBOARD UI =================
 st.set_page_config(page_title="JatmikoHunter v2.5", layout="wide")
