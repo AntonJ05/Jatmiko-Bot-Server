@@ -30,7 +30,7 @@ def kirim_telegram(pesan):
 # ================= 3. LOGIKA SINYAL (VERSI STABIL) =================
 def hitung_sinyal(symbol):
     try:
-        df = yf.download(symbol, period='1d', interval='1h', progress=False)
+        df = yf.download(symbol, period='5d', interval='1h', progress=False, auto_adjust=True)
         if len(df) < 30: return None
 
         # --- ADOPSI ELITE CIRCLE TOOL: LOGIKA ADX (14) ---
