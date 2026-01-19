@@ -101,26 +101,24 @@ st.title("🛡️ JatmikoHunter v2.5")
 dashboard_placeholder = st.empty()
 
 while True:
-    st.write(f"🔄 Memulai Pemindaian Baru: {time.strftime('%H:%M:%S')}")
+    # 1. Buat variabel waktu khusus WITA (Balikpapan)
+    tz_wita = pytz.timezone('Asia/Makassar') 
+    waktu_lokal = datetime.now(tz_wita).strftime('%H:%M:%S')
+    
+    # 2. Tampilkan di dashboard agar sama dengan jam di HP Anda
+    st.write(f"🔄 Memulai Pemindaian Baru (WITA): {waktu_lokal}")
+    
     laporan = []
     
     for koin in DAFTAR_KOIN:
         hasil = hitung_sinyal(koin)
         if hasil:
             laporan.append(hasil)
-            
-            # --- FITUR ANTI-RATE LIMIT (PENTING!) ---
-            # Memberi jeda 2 detik antar koin agar tidak diblokir Yahoo
+            # Jeda agar tidak diblokir Yahoo Finance
             time.sleep(2) 
-        
-        # Jika Whale Pump terdeteksi, langsung kirim Telegram tanpa nunggu loop selesai
-        if hasil and "PUMP" in hasil['SINYAL']:
-            # Logika kirim telegram sudah ada di dalam hitung_sinyal atau di sini
-            pass
-
-    # Tampilkan tabel hasil pemindaian terbaru
+    
+    # Tampilkan tabel hasil pemindaian
     st.table(pd.DataFrame(laporan))
     
-    # Jeda antar siklus pemindaian (Total 1 menit)
-    st.write("😴 Istirahat sejenak sebelum pemindaian berikutnya...")
+    # Tunggu 1 menit sebelum scan ulang
     time.sleep(60)
