@@ -137,58 +137,79 @@ for koin in DAFTAR_KOIN:
         laporan.append(hasil)
         time.sleep(2) # Anti-Rate Limit tetap aktif
 
-# --- 1. DEFINISI FUNGSI STYLING (WAJIB ADA agar tidak error) ---
+# --- 1. DEFINISI FUNGSI STYLING (Pastikan ada agar tidak error image_9f7e21.png) ---
 def style_sinyal(val):
+    if not val: return ""
     color = '#2ecc71' if 'BUY' in val else '#e74c3c' if 'RETRACE' in val else '#f1c40f' if 'CONFIRMATION' in val else 'white'
     return f'color: {color}; font-weight: bold'
 
 def style_zone(val):
+    if not val: return ""
     bg = '#27ae60' if val == 'DISCOUNT' else '#c0392b' if val == 'PREMIUM' else 'transparent'
-    return f'background-color: {bg}; color: white; border-radius: 5px'
+    return f'background-color: {bg}; color: white; border-radius: 5px; padding: 2px'
 
 def style_persen(val):
     color = '#00ff00' if val > 0 else '#ff4b4b' if val < 0 else 'white'
     return f'color: {color}; font-weight: bold'
 
-# --- 2. LOGIKA TRADING VIEW (Di dalam loop utama) ---
+# --- 2. KONFIGURASI AWAL ---
 if 'harga_lama' not in st.session_state:
     st.session_state.harga_lama = {}
 
+# Buat placeholder kosong agar tabel hanya ada SATU
+placeholder = st.empty() 
+
+# --- 3. LOOP PEMINDAIAN UTAMA ---
 while True:
-    laporan = []
-    # Tampilkan jam WITA Anda
-    waktu_skrg = datetime.now(pytz.timezone('Asia/Makassar')).strftime('%H:%M:%S')
-    st.write(f"🔄 Scan Terakhir (WITA): {waktu_skrg}")
-
-    for koin in DAFTAR_KOIN:
-        hasil = hitung_sinyal(koin)
-        if hasil:
-            symbol = hasil['KOIN']
-            harga_skrg = hasil['HARGA']
-            
-            # Hitung % Perubahan seperti di TradingView
-            persen_change = 0.0
-            if symbol in st.session_state.harga_lama:
-                harga_sebelumnya = st.session_state.harga_lama[symbol]
-                persen_change = ((harga_skrg - harga_sebelumnya) / harga_sebelumnya) * 100
-            
-            st.session_state.harga_lama[symbol] = harga_skrg
-            hasil['CHANGE (%)'] = round(persen_change, 2)
-            laporan.append(hasil)
-            time.sleep(2) # Tetap pakai jeda anti-blokir
-
-    # --- 3. TAMPILAN TABEL DINAMIS ---
-    if laporan:
-        df_display = pd.DataFrame(laporan)
+    with placeholder.container(): # Semua kode di sini akan menimpa tampilan lama
+        laporan = []
+        tz_wita = pytz.timezone('Asia/Makassar') 
+        waktu_skrg = datetime.now(tz_wita).strftime('%H:%M:%S')
         
-        # OTOMATIS: Kenaikan tertinggi pindah ke atas
-        df_display = df_display.sort_values(by='CHANGE (%)', ascending=False)
+        st.markdown(f"### 🛡️ JatmikoHunter TradingView Edition")
+        st.info(f"🔄 Scan Terakhir (WITA): **{waktu_skrg}**")
         
-        st.dataframe(
-            df_display.style.applymap(style_persen, subset=['CHANGE (%)'])
-                          .applymap(style_sinyal, subset=['SINYAL'])
-                          .applymap(style_zone, subset=['ZONE']),
-            use_container_width=True
-        )
+        # Mulai proses scan koin
+        for koin in DAFTAR_KOIN:
+            hasil = hitung_sinyal(koin)
+            if hasil:
+                symbol = hasil['KOIN']
+                harga_skrg = hasil['HARGA']
+                
+                # Hitung % Change
+                persen_change = 0.0
+                if symbol in st.session_state.harga_lama:
+                    harga_sebelumnya = st.session_state.harga_lama[symbol]
+                    persen_change = ((harga_skrg - harga_sebelumnya) / harga_sebelumnya) * 100
+                
+                st.session_state.harga_lama[symbol] = harga_skrg
+                hasil['CHANGE (%)'] = round(persen_change, 2)
+                laporan.append(hasil)
+                
+                # Jeda Anti-Rate Limit
+                time.sleep(2) 
 
-    time.sleep(60) # Interval refresh 1 menit
+        # --- TAMPILAN TABEL DINAMIS (SATU TABEL SAJA) ---
+if laporan:
+    df_display = pd.DataFrame(laporan)
+    
+    # Sortir berdasarkan kenaikan tertinggi
+    df_display = df_display.sort_values(by='CHANGE (%)', ascending=False)
+    
+    # Menampilkan tabel dengan format 2 digit di belakang koma
+    st.dataframe(
+        df_display.style.format({
+            'CHANGE (%)': '{:.2f}',  # MENGUNCI 2 DIGIT DI BELAKANG KOMA
+            'HARGA': '{:.4f}',
+            'ADX': '{:.1f}',
+            'FVG_AREA': '{:.4f}',
+            'ATR_SL': '{:.4f}'
+        }).applymap(style_persen, subset=['CHANGE (%)'])
+          .applymap(style_sinyal, subset=['SINYAL'])
+          .applymap(style_zone, subset=['ZONE']),
+        use_container_width=True,
+        height=600
+    )
+            
+    # Jeda 60 detik sebelum scan ulang
+    time.sleep(60)
