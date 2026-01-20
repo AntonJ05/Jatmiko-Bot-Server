@@ -113,32 +113,82 @@ def hitung_sinyal(symbol):
     except Exception as e:
         return None
 
-# ================= 4. DASHBOARD UI =================
-st.set_page_config(page_title="JatmikoHunter v2.5", layout="wide")
-st.title("🛡️ JatmikoHunter v2.5")
+# --- 1. INISIALISASI STATE UNTUK HARGA SEBELUMNYA ---
+if 'harga_lama' not in st.session_state:
+    st.session_state.harga_lama = {}
 
-dashboard_placeholder = st.empty()
+# --- 2. LOGIKA PERHITUNGAN PERSENTASE (Di dalam Loop) ---
+laporan = []
+for koin in DAFTAR_KOIN:
+    hasil = hitung_sinyal(koin)
+    if hasil:
+        symbol = hasil['KOIN']
+        harga_skrg = hasil['HARGA']
+        
+        # Hitung % Perubahan dibanding scan terakhir
+        persen_change = 0.0
+        if symbol in st.session_state.harga_lama:
+            harga_sebelumnya = st.session_state.harga_lama[symbol]
+            persen_change = ((harga_skrg - harga_sebelumnya) / harga_sebelumnya) * 100
+        
+        # Update harga untuk scan berikutnya
+        st.session_state.harga_lama[symbol] = harga_skrg
+        hasil['CHANGE (%)'] = round(persen_change, 2)
+        laporan.append(hasil)
+        time.sleep(2) # Anti-Rate Limit tetap aktif
+
+# --- 1. DEFINISI FUNGSI STYLING (WAJIB ADA agar tidak error) ---
+def style_sinyal(val):
+    color = '#2ecc71' if 'BUY' in val else '#e74c3c' if 'RETRACE' in val else '#f1c40f' if 'CONFIRMATION' in val else 'white'
+    return f'color: {color}; font-weight: bold'
+
+def style_zone(val):
+    bg = '#27ae60' if val == 'DISCOUNT' else '#c0392b' if val == 'PREMIUM' else 'transparent'
+    return f'background-color: {bg}; color: white; border-radius: 5px'
+
+def style_persen(val):
+    color = '#00ff00' if val > 0 else '#ff4b4b' if val < 0 else 'white'
+    return f'color: {color}; font-weight: bold'
+
+# --- 2. LOGIKA TRADING VIEW (Di dalam loop utama) ---
+if 'harga_lama' not in st.session_state:
+    st.session_state.harga_lama = {}
 
 while True:
-    # 1. Buat variabel waktu khusus WITA (Balikpapan)
-    tz_wita = pytz.timezone('Asia/Makassar') 
-    waktu_lokal = datetime.now(tz_wita).strftime('%H:%M:%S')
-    
-    # 2. Tampilkan di dashboard agar sama dengan jam di HP Anda
-    st.write(f"🔄 Memulai Pemindaian Baru (WITA): {waktu_lokal}")
-    
     laporan = []
-    
+    # Tampilkan jam WITA Anda
+    waktu_skrg = datetime.now(pytz.timezone('Asia/Makassar')).strftime('%H:%M:%S')
+    st.write(f"🔄 Scan Terakhir (WITA): {waktu_skrg}")
+
     for koin in DAFTAR_KOIN:
         hasil = hitung_sinyal(koin)
         if hasil:
+            symbol = hasil['KOIN']
+            harga_skrg = hasil['HARGA']
+            
+            # Hitung % Perubahan seperti di TradingView
+            persen_change = 0.0
+            if symbol in st.session_state.harga_lama:
+                harga_sebelumnya = st.session_state.harga_lama[symbol]
+                persen_change = ((harga_skrg - harga_sebelumnya) / harga_sebelumnya) * 100
+            
+            st.session_state.harga_lama[symbol] = harga_skrg
+            hasil['CHANGE (%)'] = round(persen_change, 2)
             laporan.append(hasil)
-            # Jeda agar tidak diblokir Yahoo Finance
-            time.sleep(2) 
-    
-    # Tampilkan tabel hasil pemindaian
-    st.table(pd.DataFrame(laporan))
-    
-    # Tunggu 1 menit sebelum scan ulang
-    time.sleep(60)
+            time.sleep(2) # Tetap pakai jeda anti-blokir
 
+    # --- 3. TAMPILAN TABEL DINAMIS ---
+    if laporan:
+        df_display = pd.DataFrame(laporan)
+        
+        # OTOMATIS: Kenaikan tertinggi pindah ke atas
+        df_display = df_display.sort_values(by='CHANGE (%)', ascending=False)
+        
+        st.dataframe(
+            df_display.style.applymap(style_persen, subset=['CHANGE (%)'])
+                          .applymap(style_sinyal, subset=['SINYAL'])
+                          .applymap(style_zone, subset=['ZONE']),
+            use_container_width=True
+        )
+
+    time.sleep(60) # Interval refresh 1 menit
