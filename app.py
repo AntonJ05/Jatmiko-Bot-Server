@@ -100,7 +100,7 @@ def hitung_sinyal(symbol):
                 f"🚀 _Segera cek Gate.io untuk eksekusi!_"
             )
             kirim_telegram(pesan_bot) # Memanggil fungsi dari image_6b55e5.png
-            
+
         return {
             "KOIN": symbol.replace("-USD", ""),
             "HARGA": round(c1['Close'], 4),
@@ -141,3 +141,4 @@ while True:
     
     # Tunggu 1 menit sebelum scan ulang
     time.sleep(60)
+
