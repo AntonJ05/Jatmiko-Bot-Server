@@ -87,7 +87,20 @@ def hitung_sinyal(symbol):
                 else: sinyal = "⏳ WAIT (CONFIRMATION)"
             else:
                 sinyal = "⏳ WAIT (RETRACE)"
-
+        # --- LOGIKA NOTIFIKASI TELEGRAM (Hanya untuk STRONG BUY) ---
+        if "🚀 STRONG BUY" in sinyal:
+            pesan_bot = (
+                f"🔔 *SINYAL WHALE PUMP TERDETEKSI!*\n\n"
+                f"🪙 *Koin:* {symbol.replace('-USD', '')}\n"
+                f"💰 *Harga:* {round(c1['Close'], 4)}\n"
+                f"📈 *Tren (ADX):* {round(c1['ADX'], 1)} (STRONG)\n"
+                f"🎯 *Target Entry (FVG):* {fvg_price}\n"
+                f"⚡ *Konfirmasi:* {sinyal.split('(')[1].replace(')', '')}\n"
+                f"🛡️ *Zona:* DISCOUNT\n\n"
+                f"🚀 _Segera cek Gate.io untuk eksekusi!_"
+            )
+            kirim_telegram(pesan_bot) # Memanggil fungsi dari image_6b55e5.png
+            
         return {
             "KOIN": symbol.replace("-USD", ""),
             "HARGA": round(c1['Close'], 4),
